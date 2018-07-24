@@ -1,0 +1,8 @@
+version: '2'
+services:
+    docker-apk:
+        build: .
+        container_name: docker-apk
+        volumes:
+            - $PWD/..:/app
+
