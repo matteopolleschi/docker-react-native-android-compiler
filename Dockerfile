@@ -1,50 +1,91 @@
-FROM ubuntu:18.04
+FROM ubuntu:16.04
 
-MAINTAINER Angelo DErrico
+MAINTAINER Dmitry Prokhorov <dipspb@gmail.com>
 
-# ENV DEBIAN_FRONTEND = noninteractive
+ENV DEBIAN_FRONTEND noninteractive
 
-RUN mkdir -p /app
-RUN mkdir -p /development/android-sdk
+LABEL version="1.0.0"
 
-# RUN cd /development
+RUN apt-get update && \
+	apt-get install -y --show-progress --no-install-recommends \
+        curl \
+        zip unzip \
+        sudo \
+        gnupg \
+        libstdc++6 libgcc1 zlib1g libncurses5 \
+        default-jdk \
+        git \
+        make \
+        build-essential \
+        python-dev
 
-RUN apt-get update
-RUN apt-get upgrade
-RUN apt-get install -y unzip curl gnupg software-properties-common
+RUN curl -sL https://deb.nodesource.com/setup_8.x | sudo -E bash -
 
-RUN curl -sL https://deb.nodesource.com/setup_10.x | bash -
-RUN apt-get install -y nodejs
-RUN apt-get install -y build-essential
+RUN apt-get update && \
+	apt-get install -y --show-progress --no-install-recommends \
+        nodejs
 
-RUN npm install -g react-native-cli
+RUN npm install npm --global
 
-RUN apt-get install -y gcc g++ make
-RUN curl -sL https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
-RUN echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list
-RUN apt-get update
-RUN apt-get install -y yarn
+# Install 32bit support for Android SDK
+RUN dpkg --add-architecture i386 && \
+    apt-get update -q && \
+    apt-get install -qy --no-install-recommends libstdc++6:i386 libgcc1:i386 zlib1g:i386 libncurses5:i386
 
-RUN echo oracle-java8-installer shared/accepted-oracle-license-v1-1 select true | debconf-set-selections
-RUN add-apt-repository -y ppa:webupd8team/java
-RUN apt-get update
-RUN apt-get install -y oracle-java8-installer
+ENV ANDROID_SDK_FILE tools_r25.2.5-macosx.zip
+ENV ANDROID_SDK_URL https://dl.google.com/android/repository/$ANDROID_SDK_FILE
 
-RUN wget -O /development/android-sdk/sdk-tools-linux-4333796.zip https://dl.google.com/android/repository/sdk-tools-linux-4333796.zip
-RUN unzip development/android-sdk/sdk-tools-linux-4333796.zip -d /development/android-sdk
+## Install Android SDK
+ENV ANDROID_HOME /usr/local/android-sdk-linux
+RUN cd /usr/local && \
+    mkdir -p $ANDROID_HOME && \
+    cd $ANDROID_HOME && \
+    curl $ANDROID_SDK_URL --output $ANDROID_SDK_FILE && \
+    unzip $ANDROID_SDK_FILE && \
+    export PATH=$PATH:$ANDROID_HOME/tools:$ANDROID_HOME/platform-tools && \
+    chgrp -R users $ANDROID_HOME && \
+    chmod -R 0775 $ANDROID_HOME && \
+    rm $ANDROID_SDK_FILE
 
-ENV ANDROID_API_LEVELS android-26
-ENV ANDROID_BUILD_TOOLS_VERSION 26.0.3
-ENV ANDROID_HOME /development/android-sdk
-ENV PATH ${PATH}:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:${ANDROID_HOME}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}
+ARG ANDROID_SDK_VERSION=26
+ARG ANDROID_BUILD_TOOLS_VERSION=26.0.2
 
-RUN mkdir -p $ANDROID_HOME/licenses
-RUN echo 8933bad161af4178b1185d1a37fbf41ea5269c55 > $ANDROID_HOME/licenses/android-sdk-license
-RUN echo d56f5187479451eabf01fb78af6dfcb131a6481e >> $ANDROID_HOME/licenses/android-sdk-license
+ENV PATH $PATH:$ANDROID_HOME/tools:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS_VERSION
 
-RUN $ANDROID_HOME/tools/bin/sdkmanager "tools" "platform-tools"
-RUN $ANDROID_HOME/tools/bin/sdkmanager "build-tools;${ANDROID_BUILD_TOOLS_VERSION}"
-RUN $ANDROID_HOME/tools/bin/sdkmanager "platforms;${ANDROID_API_LEVELS}"
+RUN (while sleep 3; do echo "y"; done) | android update sdk \
+    --no-ui \
+    --force \
+    --all \
+    --filter platform-tools,android-$ANDROID_SDK_VERSION,build-tools-$ANDROID_BUILD_TOOLS_VERSION,extra-android-support,extra-android-m2repository,sys-img-x86_64-android-$ANDROID_SDK_VERSION,extra-google-m2repository
 
-RUN cd /app
-WORKDIR /app
+
+RUN npm install -g react-native-cli@2.0.1 create-react-native-app node-gyp
+
+RUN apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
+    npm cache clear --force
+
+EXPOSE 8081
+
+# ENV USERNAME dev
+
+# RUN adduser --disabled-password --gecos '' $USERNAME && \
+#     echo $USERNAME:$USERNAME | chpasswd && \
+#     echo "%sudo ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers && \
+#     adduser $USERNAME sudo
+
+ENV TINI_VERSION v0.18.0
+ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
+RUN chmod +x /tini
+
+# USER $USERNAME
+USER root
+
+# WORKDIR /home/$USERNAME
+WORKDIR /root
+
+# ENV GRADLE_USER_HOME /home/$USERNAME/app/android/gradle_deps
+ENV GRADLE_USER_HOME /root/app/android/gradle_deps
+
+ENTRYPOINT ["/tini", "--"]
+
